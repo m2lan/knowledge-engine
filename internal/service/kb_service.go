@@ -349,3 +349,8 @@ func (s *KnowledgeBaseService) DeleteDocument(ctx context.Context, userID, kbID,
 	_ = s.chunkRepo.DeleteByDocument(ctx, docID)
 	return s.docRepo.Delete(ctx, docID)
 }
+
+// GetDocument returns a document by ID.
+func (s *KnowledgeBaseService) GetDocument(ctx context.Context, docID uuid.UUID) (*domain.Document, error) {
+	return s.docRepo.GetByID(ctx, docID)
+}
