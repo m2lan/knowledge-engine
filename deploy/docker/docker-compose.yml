@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: knowledge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  knowledge-engine:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/knowledge?sslmode=disable"
+      REDIS_URL: ""
+      STORAGE_TYPE: local
+      STORAGE_BUCKET: knowledge-docs
+      STORAGE_LOCAL_PATH: /app/data/docs
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL}"
+      JWT_SECRET: "${JWT_SECRET}"
+      SERVER_ADDRESS: ":8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - docs:/app/data/docs
+
+volumes:
+  pgdata:
+  docs:
