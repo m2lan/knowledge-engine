@@ -11,7 +11,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../../migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -28,6 +27,11 @@ services:
       timeout: 5s
       retries: 5
 
+  tika:
+    image: apache/tika:latest
+    ports:
+      - "9998:9998"
+
   knowledge-engine:
     build:
       context: ../..
@@ -36,20 +40,53 @@ services:
       - "8083:8083"
     environment:
       DATABASE_URL: "postgres://postgres:postgres@postgres:5432/knowledge?sslmode=disable"
-      REDIS_URL: ""
+      SKIP_MIGRATIONS: "false"
+
+      # Cache — falls back to in-memory if Redis is unreachable.
+      REDIS_URL: "redis://redis:6379/0"
+      SEARCH_CACHE_TTL: "60s"
+
       STORAGE_TYPE: local
       STORAGE_BUCKET: knowledge-docs
       STORAGE_LOCAL_PATH: /app/data/docs
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
-      EMBEDDING_MODEL: "${EMBEDDING_MODEL}"
-      JWT_SECRET: "${JWT_SECRET}"
+
+      EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openai}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-}"
+      EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-}"
+      # Leave empty to use the model default (OpenAI = 1536, Gemini/Ollama = 768).
+      EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-}"
+
+      PARSER_TYPE: "tika"
+      TIKA_ENDPOINT: "http://tika:9998"
+      TIKA_TIMEOUT: "60s"
+
+      # noop: every request is attributed to DEFAULT_USER_ID (local trial mode).
+      # apikey: send X-API-Key or Authorization: Bearer <API_KEY>.
+      # jwt: send Authorization: Bearer <token>.
+      AUTH_TYPE: "${AUTH_TYPE:-noop}"
+      API_KEY: "${API_KEY:-}"
+      API_KEY_USER_ID: "${API_KEY_USER_ID:-00000000-0000-0000-0000-000000000001}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      JWT_ISSUER: "knowledge-engine"
+      DEFAULT_USER_ID: "00000000-0000-0000-0000-000000000001"
+
       SERVER_ADDRESS: ":8083"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      tika:
+        condition: service_started
     volumes:
       - docs:/app/data/docs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   pgdata:
