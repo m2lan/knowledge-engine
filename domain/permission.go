@@ -42,14 +42,14 @@ type Permission struct {
 
 // PermissionAuditLog records permission changes.
 type PermissionAuditLog struct {
-	ID              uuid.UUID       `json:"id" db:"id"`
-	KnowledgeBaseID uuid.UUID       `json:"knowledge_base_id" db:"knowledge_base_id"`
-	ActorID         uuid.UUID       `json:"actor_id" db:"actor_id"`
-	Action          string          `json:"action" db:"action"` // "grant", "revoke", "update"
-	TargetType      string          `json:"target_type" db:"target_type"`
-	TargetID        uuid.UUID       `json:"target_id" db:"target_id"`
-	OldRole         *PermissionRole `json:"old_role,omitempty" db:"old_role"`
-	NewRole         *PermissionRole `json:"new_role,omitempty" db:"new_role"`
+	ID              uuid.UUID              `json:"id" db:"id"`
+	KnowledgeBaseID uuid.UUID              `json:"knowledge_base_id" db:"knowledge_base_id"`
+	ActorID         uuid.UUID              `json:"actor_id" db:"actor_id"`
+	Action          string                 `json:"action" db:"action"` // "grant", "revoke", "update"
+	TargetType      string                 `json:"target_type" db:"target_type"`
+	TargetID        uuid.UUID              `json:"target_id" db:"target_id"`
+	OldRole         *PermissionRole        `json:"old_role,omitempty" db:"old_role"`
+	NewRole         *PermissionRole        `json:"new_role,omitempty" db:"new_role"`
 	Details         map[string]interface{} `json:"details,omitempty" db:"details"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+	CreatedAt       time.Time              `json:"created_at" db:"created_at"`
 }

@@ -2,6 +2,8 @@
 -- Migration: Create Knowledge Engine tables
 -- =============================================================================
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Knowledge Bases
 CREATE TABLE IF NOT EXISTS knowledge_bases (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -11,6 +13,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     name           VARCHAR(100) NOT NULL,
     description    TEXT,
     embedding_model VARCHAR(100) NOT NULL DEFAULT 'text-embedding-3-small',
+    embedding_dimensions INT NOT NULL DEFAULT 1536,
     chunk_size     INT NOT NULL DEFAULT 512,
     chunk_overlap  INT NOT NULL DEFAULT 50,
     doc_count      INT NOT NULL DEFAULT 0,
@@ -23,6 +26,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at     TIMESTAMPTZ
 );
+
+ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS embedding_dimensions INT NOT NULL DEFAULT 1536;
 
 CREATE INDEX IF NOT EXISTS idx_kb_user ON knowledge_bases(user_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_kb_org ON knowledge_bases(org_id) WHERE deleted_at IS NULL;
@@ -51,6 +56,9 @@ CREATE INDEX IF NOT EXISTS idx_docs_kb ON documents(knowledge_base_id) WHERE del
 CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status) WHERE status != 'ready';
 
 -- Document Chunks
+-- The default column matches the default embedding provider (OpenAI
+-- text-embedding-3-small, 1536 dims). Engines embedding with a different
+-- dimension create an additional `embedding_<dimensions>` column at startup.
 CREATE TABLE IF NOT EXISTS document_chunks (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id      UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -63,7 +71,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     end_page         INT,
     heading          TEXT,
     metadata         JSONB NOT NULL DEFAULT '{}',
-    embedding        vector(768),
+    embedding        vector(1536),
     content_tsv      tsvector,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -89,6 +97,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_chunk_tsv ON document_chunks;
 CREATE TRIGGER trg_chunk_tsv
     BEFORE INSERT OR UPDATE ON document_chunks
     FOR EACH ROW EXECUTE FUNCTION update_chunk_tsv();
@@ -101,10 +110,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_knowledge_bases_updated_at ON knowledge_bases;
 CREATE TRIGGER update_knowledge_bases_updated_at
     BEFORE UPDATE ON knowledge_bases
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_documents_updated_at ON documents;
 CREATE TRIGGER update_documents_updated_at
     BEFORE UPDATE ON documents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

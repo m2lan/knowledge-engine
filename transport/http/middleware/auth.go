@@ -27,14 +27,9 @@ func Auth(authenticator types.Authenticator) func(http.Handler) http.Handler {
 			}
 
 			token := extractToken(r)
-			if token == "" {
-				http.Error(w, `{"error":{"code":401,"message":"unauthorized"}}`, http.StatusUnauthorized)
-				return
-			}
-
 			userInfo, err := authenticator.Authenticate(token)
 			if err != nil {
-				http.Error(w, `{"error":{"code":401,"message":"unauthorized"}}`, http.StatusUnauthorized)
+				writeUnauthorized(w)
 				return
 			}
 
@@ -42,6 +37,12 @@ func Auth(authenticator types.Authenticator) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func writeUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":{"code":401,"message":"unauthorized"}}`))
 }
 
 // GetUserInfo extracts the authenticated user from the request context.
@@ -57,6 +58,9 @@ func extractToken(r *http.Request) string {
 		if strings.HasPrefix(auth, "Bearer ") {
 			return strings.TrimPrefix(auth, "Bearer ")
 		}
+	}
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return key
 	}
 	if token := r.URL.Query().Get("token"); token != "" {
 		return token

@@ -15,11 +15,12 @@ import (
 
 // KBUpdate holds fields for updating a knowledge base.
 type KBUpdate struct {
-	Name           *string
-	Description    *string
-	EmbeddingModel *string
-	ChunkSize      *int
-	ChunkOverlap   *int
+	Name                *string
+	Description         *string
+	EmbeddingModel      *string
+	EmbeddingDimensions *int
+	ChunkSize           *int
+	ChunkOverlap        *int
 }
 
 // KnowledgeBaseRepository defines the interface for knowledge base data access.
@@ -44,24 +45,24 @@ func NewKnowledgeBaseRepository(pool *pgxpool.Pool) KnowledgeBaseRepository {
 
 func (r *kbRepository) Create(ctx context.Context, kb *domain.KnowledgeBase) error {
 	query := `
-		INSERT INTO knowledge_bases (id, user_id, org_id, name, description, template_id, embedding_model, chunk_size, chunk_overlap, settings)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO knowledge_bases (id, user_id, org_id, name, description, template_id, embedding_model, embedding_dimensions, chunk_size, chunk_overlap, settings)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
 		kb.ID, kb.UserID, kb.OrgID, kb.Name, kb.Description, kb.TemplateID,
-		kb.EmbeddingModel, kb.ChunkSize, kb.ChunkOverlap, kb.Settings,
+		kb.EmbeddingModel, kb.EmbeddingDimensions, kb.ChunkSize, kb.ChunkOverlap, kb.Settings,
 	).Scan(&kb.CreatedAt, &kb.UpdatedAt)
 }
 
 func (r *kbRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.KnowledgeBase, error) {
 	query := `
-		SELECT id, user_id, org_id, name, description, template_id, embedding_model, chunk_size, chunk_overlap,
+		SELECT id, user_id, org_id, name, description, template_id, embedding_model, embedding_dimensions, chunk_size, chunk_overlap,
 		       doc_count, chunk_count, total_tokens, total_size, settings, status, created_at, updated_at
 		FROM knowledge_bases WHERE id = $1 AND deleted_at IS NULL`
 	kb := &domain.KnowledgeBase{}
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&kb.ID, &kb.UserID, &kb.OrgID, &kb.Name, &kb.Description, &kb.TemplateID,
-		&kb.EmbeddingModel, &kb.ChunkSize, &kb.ChunkOverlap,
+		&kb.EmbeddingModel, &kb.EmbeddingDimensions, &kb.ChunkSize, &kb.ChunkOverlap,
 		&kb.DocCount, &kb.ChunkCount, &kb.TotalTokens, &kb.TotalSize,
 		&kb.Settings, &kb.Status, &kb.CreatedAt, &kb.UpdatedAt,
 	)
@@ -87,6 +88,16 @@ func (r *kbRepository) Update(ctx context.Context, id uuid.UUID, update *KBUpdat
 	if update.Description != nil {
 		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argIdx))
 		args = append(args, *update.Description)
+		argIdx++
+	}
+	if update.EmbeddingModel != nil {
+		setClauses = append(setClauses, fmt.Sprintf("embedding_model = $%d", argIdx))
+		args = append(args, *update.EmbeddingModel)
+		argIdx++
+	}
+	if update.EmbeddingDimensions != nil {
+		setClauses = append(setClauses, fmt.Sprintf("embedding_dimensions = $%d", argIdx))
+		args = append(args, *update.EmbeddingDimensions)
 		argIdx++
 	}
 	if update.ChunkSize != nil {
@@ -137,7 +148,7 @@ func (r *kbRepository) List(ctx context.Context, userID uuid.UUID, offset, limit
 	}
 
 	query := `
-		SELECT id, user_id, org_id, name, description, template_id, embedding_model, chunk_size, chunk_overlap,
+		SELECT id, user_id, org_id, name, description, template_id, embedding_model, embedding_dimensions, chunk_size, chunk_overlap,
 		       doc_count, chunk_count, total_tokens, total_size, settings, status, created_at, updated_at
 		FROM knowledge_bases WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
@@ -152,7 +163,7 @@ func (r *kbRepository) List(ctx context.Context, userID uuid.UUID, offset, limit
 		kb := &domain.KnowledgeBase{}
 		if err := rows.Scan(
 			&kb.ID, &kb.UserID, &kb.OrgID, &kb.Name, &kb.Description, &kb.TemplateID,
-			&kb.EmbeddingModel, &kb.ChunkSize, &kb.ChunkOverlap,
+			&kb.EmbeddingModel, &kb.EmbeddingDimensions, &kb.ChunkSize, &kb.ChunkOverlap,
 			&kb.DocCount, &kb.ChunkCount, &kb.TotalTokens, &kb.TotalSize,
 			&kb.Settings, &kb.Status, &kb.CreatedAt, &kb.UpdatedAt,
 		); err != nil {
@@ -165,7 +176,7 @@ func (r *kbRepository) List(ctx context.Context, userID uuid.UUID, offset, limit
 
 func (r *kbRepository) ListAllByUser(ctx context.Context, userID uuid.UUID) ([]*domain.KnowledgeBase, error) {
 	query := `
-		SELECT id, user_id, org_id, name, description, template_id, embedding_model, chunk_size, chunk_overlap,
+		SELECT id, user_id, org_id, name, description, template_id, embedding_model, embedding_dimensions, chunk_size, chunk_overlap,
 		       doc_count, chunk_count, total_tokens, total_size, settings, status, created_at, updated_at
 		FROM knowledge_bases WHERE user_id = $1 AND deleted_at IS NULL AND status IN ('active', 'ready')
 		ORDER BY created_at DESC`
@@ -180,7 +191,7 @@ func (r *kbRepository) ListAllByUser(ctx context.Context, userID uuid.UUID) ([]*
 		kb := &domain.KnowledgeBase{}
 		if err := rows.Scan(
 			&kb.ID, &kb.UserID, &kb.OrgID, &kb.Name, &kb.Description, &kb.TemplateID,
-			&kb.EmbeddingModel, &kb.ChunkSize, &kb.ChunkOverlap,
+			&kb.EmbeddingModel, &kb.EmbeddingDimensions, &kb.ChunkSize, &kb.ChunkOverlap,
 			&kb.DocCount, &kb.ChunkCount, &kb.TotalTokens, &kb.TotalSize,
 			&kb.Settings, &kb.Status, &kb.CreatedAt, &kb.UpdatedAt,
 		); err != nil {

@@ -50,8 +50,8 @@ func defaultHTTPClient() *http.Client {
 
 func init() {
 	Register("openai", func(cfg EmbedderConfig) (Embedder, error) {
-		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("openai embedding provider requires api_key")
+		if cfg.APIKey == "" && cfg.BaseURL == "" {
+			return nil, fmt.Errorf("openai embedding provider requires api_key (or a base_url for local endpoints)")
 		}
 		return NewOpenAIEmbedder(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.Dimensions, cfg.HTTPClient), nil
 	})

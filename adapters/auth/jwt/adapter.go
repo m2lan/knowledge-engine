@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
 	"github.com/omnidev/knowledge-engine/types"
 )
@@ -45,12 +46,18 @@ func (a *Adapter) Authenticate(tokenStr string) (*types.UserInfo, error) {
 	}
 
 	userID, _ := claims["user_id"].(string)
+	if userID == "" {
+		userID, _ = claims.GetSubject()
+	}
 	email, _ := claims["email"].(string)
 	role, _ := claims["role"].(string)
 	orgID, _ := claims["org_id"].(string)
 
 	if userID == "" {
 		return nil, fmt.Errorf("missing user_id in token")
+	}
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, fmt.Errorf("user_id must be a UUID: %w", err)
 	}
 
 	return &types.UserInfo{

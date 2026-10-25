@@ -4,6 +4,7 @@ package chunker
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Chunker defines the interface for text chunking.
@@ -56,48 +57,51 @@ func (c *SemanticChunker) ChunkText(text string) []Chunk {
 		}}
 	}
 
-	paragraphs := splitParagraphs(text)
+	paragraphs := c.paragraphsWithOffsets(text)
 	chunks := make([]Chunk, 0)
-	currentChunk := strings.Builder{}
-	chunkIndex := 0
-	startPos := 0
+	var buffer strings.Builder
+	chunkStart := 0
+	lastEnd := 0
 
-	for _, para := range paragraphs {
-		if currentChunk.Len()+len(para) > c.chunkSize && currentChunk.Len() > 0 {
-			content := strings.TrimSpace(currentChunk.String())
-			if content != "" {
-				chunks = append(chunks, Chunk{
-					Content:  content,
-					Index:    chunkIndex,
-					StartPos: startPos,
-					EndPos:   startPos + len(content),
-					Metadata: map[string]interface{}{},
-				})
-				chunkIndex++
-			}
-			overlap := getOverlap(currentChunk.String(), c.chunkOverlap)
-			currentChunk.Reset()
-			currentChunk.WriteString(overlap)
-			startPos += currentChunk.Len() - len(overlap)
-		}
-		if currentChunk.Len() > 0 {
-			currentChunk.WriteString("\n\n")
-		}
-		currentChunk.WriteString(para)
-	}
-
-	if currentChunk.Len() > 0 {
-		content := strings.TrimSpace(currentChunk.String())
+	flush := func() {
+		content := strings.TrimSpace(buffer.String())
 		if content != "" {
 			chunks = append(chunks, Chunk{
 				Content:  content,
-				Index:    chunkIndex,
-				StartPos: startPos,
-				EndPos:   startPos + len(content),
+				Index:    len(chunks),
+				StartPos: chunkStart,
+				EndPos:   lastEnd,
 				Metadata: map[string]interface{}{},
 			})
 		}
 	}
+
+	for _, paragraph := range paragraphs {
+		addition := len(paragraph.text)
+		if buffer.Len() > 0 {
+			addition += 2
+		}
+		if buffer.Len() > 0 && buffer.Len()+addition > c.chunkSize {
+			previous := buffer.String()
+			flush()
+			overlap := getOverlap(previous, c.chunkOverlap)
+			buffer.Reset()
+			buffer.WriteString(overlap)
+			chunkStart = paragraph.start - len(overlap)
+			if chunkStart < 0 {
+				chunkStart = paragraph.start
+			}
+		}
+		if buffer.Len() == 0 {
+			chunkStart = paragraph.start
+		} else {
+			buffer.WriteString("\n\n")
+		}
+		buffer.WriteString(paragraph.text)
+		lastEnd = paragraph.end
+	}
+	flush()
+
 	return chunks
 }
 
@@ -105,14 +109,12 @@ func (c *SemanticChunker) ChunkText(text string) []Chunk {
 func (c *SemanticChunker) ChunkTextWithHeading(text string) []Chunk {
 	sections := splitByHeading(text)
 	chunks := make([]Chunk, 0)
-	chunkIndex := 0
 	for _, section := range sections {
 		sectionChunks := c.ChunkText(section.Content)
 		for _, chunk := range sectionChunks {
-			chunk.Index = chunkIndex
+			chunk.Index = len(chunks)
 			chunk.Metadata["heading"] = section.Heading
 			chunks = append(chunks, chunk)
-			chunkIndex++
 		}
 	}
 	return chunks
@@ -132,24 +134,78 @@ func EstimateTokens(text string) int {
 	return cjkCount + (asciiCount / 4)
 }
 
-func splitParagraphs(text string) []string {
-	paragraphs := strings.Split(text, "\n\n")
-	result := make([]string, 0, len(paragraphs))
-	for _, p := range paragraphs {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
+type paragraph struct {
+	text  string
+	start int
+	end   int
+}
+
+func (c *SemanticChunker) paragraphsWithOffsets(text string) []paragraph {
+	result := make([]paragraph, 0)
+	cursor := 0
+	for _, raw := range strings.Split(text, "\n\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			cursor += len(raw) + 2
+			continue
 		}
+		start := strings.Index(text[cursor:], trimmed)
+		if start < 0 {
+			start = 0
+		}
+		start += cursor
+		end := start + len(trimmed)
+
+		if len(trimmed) <= c.chunkSize {
+			result = append(result, paragraph{text: trimmed, start: start, end: end})
+		} else {
+			offset := 0
+			for offset < len(trimmed) {
+				cut := offset + c.chunkSize
+				if cut >= len(trimmed) {
+					cut = len(trimmed)
+				} else {
+					cut = sentenceBoundary(trimmed, offset, cut)
+				}
+				piece := strings.TrimSpace(trimmed[offset:cut])
+				if piece != "" {
+					pieceStart := start + strings.Index(trimmed[offset:], piece)
+					result = append(result, paragraph{
+						text:  piece,
+						start: pieceStart,
+						end:   pieceStart + len(piece),
+					})
+				}
+				offset = cut
+			}
+		}
+		cursor = end
 	}
 	return result
 }
 
+// sentenceBoundary walks back from cut to the last sentence or word boundary,
+// never splitting a UTF-8 rune.
+func sentenceBoundary(text string, lower, cut int) int {
+	segment := text[lower:cut]
+	if idx := strings.LastIndexAny(segment, ".!?\n。！？ "); idx > 0 {
+		_, size := utf8.DecodeRuneInString(segment[idx:])
+		if boundary := lower + idx + size; boundary > lower {
+			return boundary
+		}
+	}
+	for cut > lower && cut < len(text) && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return cut
+}
+
 func getOverlap(text string, n int) string {
 	if n <= 0 || len(text) <= n {
-		return text
+		return ""
 	}
 	overlap := text[len(text)-n:]
-	if idx := strings.IndexByte(overlap, '.'); idx > 0 {
+	if idx := strings.IndexByte(overlap, '.'); idx >= 0 && idx < len(overlap)-1 {
 		overlap = overlap[idx+1:]
 	}
 	return strings.TrimSpace(overlap)

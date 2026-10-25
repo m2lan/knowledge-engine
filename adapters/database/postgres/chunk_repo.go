@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/omnidev/knowledge-engine/domain"
 )
+
+var embeddingColumnPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // ChunkRepository defines the interface for document chunk data access.
 type ChunkRepository interface {
@@ -22,11 +25,17 @@ type ChunkRepository interface {
 }
 
 type chunkRepository struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	embeddingColumn string
 }
 
-func NewChunkRepository(pool *pgxpool.Pool) ChunkRepository {
-	return &chunkRepository{pool: pool}
+// NewChunkRepository creates a new chunk repository. embeddingColumn is the
+// dimension-specific pgvector column returned by EnsureEmbeddingColumn.
+func NewChunkRepository(pool *pgxpool.Pool, embeddingColumn string) ChunkRepository {
+	if !embeddingColumnPattern.MatchString(embeddingColumn) {
+		embeddingColumn = defaultEmbeddingColumn
+	}
+	return &chunkRepository{pool: pool, embeddingColumn: embeddingColumn}
 }
 
 func (r *chunkRepository) CreateBatch(ctx context.Context, chunks []domain.DocumentChunk) error {
@@ -34,9 +43,9 @@ func (r *chunkRepository) CreateBatch(ctx context.Context, chunks []domain.Docum
 		return nil
 	}
 	batch := &pgx.Batch{}
-	query := `
-		INSERT INTO document_chunks (id, document_id, knowledge_base_id, chunk_index, content, content_length, token_count, start_page, end_page, heading, metadata, embedding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	query := fmt.Sprintf(`
+		INSERT INTO document_chunks (id, document_id, knowledge_base_id, chunk_index, content, content_length, token_count, start_page, end_page, heading, metadata, %s)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, r.embeddingColumn)
 	for _, chunk := range chunks {
 		batch.Queue(query,
 			chunk.ID, chunk.DocumentID, chunk.KnowledgeBaseID, chunk.ChunkIndex,

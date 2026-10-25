@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -90,6 +91,9 @@ func (e *OpenAIEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 		"model": e.model,
 		"input": texts,
 	}
+	if supportsDimensionsParam(e.model) {
+		body["dimensions"] = e.dimensions
+	}
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -116,14 +120,28 @@ func (e *OpenAIEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+	if len(result.Data) != len(texts) {
+		return nil, fmt.Errorf("embedding provider returned %d vectors for %d inputs", len(result.Data), len(texts))
+	}
 
-	vectors := make([][]float32, len(result.Data))
-	for i, d := range result.Data {
+	vectors := make([][]float32, len(texts))
+	for _, d := range result.Data {
+		if d.Index < 0 || d.Index >= len(texts) {
+			return nil, fmt.Errorf("embedding provider returned invalid index %d", d.Index)
+		}
+		if len(d.Embedding) != e.dimensions {
+			return nil, fmt.Errorf("embedding model %q returned %d dimensions, expected %d", e.model, len(d.Embedding), e.dimensions)
+		}
 		vec := make([]float32, len(d.Embedding))
 		for j, v := range d.Embedding {
 			vec[j] = float32(v)
 		}
-		vectors[i] = vec
+		vectors[d.Index] = vec
+	}
+	for i, vec := range vectors {
+		if vec == nil {
+			return nil, fmt.Errorf("embedding provider omitted vector for input %d", i)
+		}
 	}
 	return vectors, nil
 }
@@ -146,7 +164,7 @@ type GeminiEmbedder struct {
 // NewGeminiEmbedder creates a new Gemini embedder.
 func NewGeminiEmbedder(apiKey, model string, dimensions int, client *http.Client) *GeminiEmbedder {
 	if model == "" {
-		model = "gemini-embedding-2"
+		model = "gemini-embedding-001"
 	}
 	if dimensions == 0 {
 		dimensions = 768
@@ -200,6 +218,9 @@ func (e *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+	if len(result.Embedding.Values) != e.dimensions {
+		return nil, fmt.Errorf("embedding model %q returned %d dimensions, expected %d", e.model, len(result.Embedding.Values), e.dimensions)
+	}
 
 	vec := make([]float32, len(result.Embedding.Values))
 	for i, v := range result.Embedding.Values {
@@ -240,4 +261,10 @@ func openaiDefaultDimensions(model string) int {
 	default:
 		return 1536
 	}
+}
+
+// supportsDimensionsParam reports whether the OpenAI model accepts the
+// `dimensions` request parameter. Older models reject unknown fields.
+func supportsDimensionsParam(model string) bool {
+	return strings.HasPrefix(model, "text-embedding-3")
 }

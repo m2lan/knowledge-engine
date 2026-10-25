@@ -20,6 +20,7 @@ type DocumentRepository interface {
 	UpdateStats(ctx context.Context, id uuid.UUID, chunkCount int, totalTokens int64) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	ListByKB(ctx context.Context, kbID uuid.UUID, offset, limit int) ([]*domain.Document, int, error)
+	CountByKB(ctx context.Context, kbID uuid.UUID) (int, error)
 }
 
 type documentRepository struct {
@@ -124,4 +125,13 @@ func (r *documentRepository) ListByKB(ctx context.Context, kbID uuid.UUID, offse
 		docs = append(docs, doc)
 	}
 	return docs, total, nil
+}
+
+func (r *documentRepository) CountByKB(ctx context.Context, kbID uuid.UUID) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM documents WHERE knowledge_base_id = $1 AND deleted_at IS NULL`, kbID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count documents: %w", err)
+	}
+	return count, nil
 }

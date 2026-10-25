@@ -30,6 +30,6 @@ func New(databaseURL string) (*Adapter, error) {
 	return &Adapter{pool: pool}, nil
 }
 
-func (a *Adapter) Pool() *pgxpool.Pool { return a.pool }
-func (a *Adapter) Close() error        { a.pool.Close(); return nil }
+func (a *Adapter) Pool() *pgxpool.Pool            { return a.pool }
+func (a *Adapter) Close() error                   { a.pool.Close(); return nil }
 func (a *Adapter) Ping(ctx context.Context) error { return a.pool.Ping(ctx) }

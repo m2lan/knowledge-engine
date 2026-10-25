@@ -57,9 +57,9 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"data": results,
 		"meta": map[string]interface{}{
-			"count":    len(results),
-			"query":    input.Query,
-			"kb_id":    kbID.String(),
+			"count": len(results),
+			"query": input.Query,
+			"kb_id": kbID.String(),
 		},
 	})
 }

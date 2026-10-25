@@ -8,14 +8,14 @@ import (
 
 // Sentinel errors for common cases.
 var (
-	ErrNotFound         = &AppError{Code: http.StatusNotFound, Message: "resource not found"}
-	ErrUnauthorized     = &AppError{Code: http.StatusUnauthorized, Message: "unauthorized"}
-	ErrForbidden        = &AppError{Code: http.StatusForbidden, Message: "forbidden"}
-	ErrValidation       = &AppError{Code: http.StatusBadRequest, Message: "validation failed"}
-	ErrConflict         = &AppError{Code: http.StatusConflict, Message: "resource conflict"}
-	ErrInternal         = &AppError{Code: http.StatusInternalServerError, Message: "internal error"}
-	ErrTooManyRequests  = &AppError{Code: http.StatusTooManyRequests, Message: "too many requests"}
-	ErrServiceUnavail   = &AppError{Code: http.StatusServiceUnavailable, Message: "service unavailable"}
+	ErrNotFound        = &AppError{Code: http.StatusNotFound, Message: "resource not found"}
+	ErrUnauthorized    = &AppError{Code: http.StatusUnauthorized, Message: "unauthorized"}
+	ErrForbidden       = &AppError{Code: http.StatusForbidden, Message: "forbidden"}
+	ErrValidation      = &AppError{Code: http.StatusBadRequest, Message: "validation failed"}
+	ErrConflict        = &AppError{Code: http.StatusConflict, Message: "resource conflict"}
+	ErrInternal        = &AppError{Code: http.StatusInternalServerError, Message: "internal error"}
+	ErrTooManyRequests = &AppError{Code: http.StatusTooManyRequests, Message: "too many requests"}
+	ErrServiceUnavail  = &AppError{Code: http.StatusServiceUnavailable, Message: "service unavailable"}
 )
 
 // AppError is a structured application error with an HTTP status code.

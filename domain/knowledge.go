@@ -19,24 +19,25 @@ const (
 
 // KnowledgeBase represents a collection of documents.
 type KnowledgeBase struct {
-	ID             uuid.UUID              `json:"id" db:"id"`
-	UserID         uuid.UUID              `json:"user_id" db:"user_id"`
-	OrgID          *uuid.UUID             `json:"org_id,omitempty" db:"org_id"`
-	Name           string                 `json:"name" db:"name"`
-	Description    *string                `json:"description,omitempty" db:"description"`
-	TemplateID     *uuid.UUID             `json:"template_id,omitempty" db:"template_id"`
-	EmbeddingModel string                 `json:"embedding_model" db:"embedding_model"`
-	ChunkSize      int                    `json:"chunk_size" db:"chunk_size"`
-	ChunkOverlap   int                    `json:"chunk_overlap" db:"chunk_overlap"`
-	DocCount       int                    `json:"doc_count" db:"doc_count"`
-	ChunkCount     int                    `json:"chunk_count" db:"chunk_count"`
-	TotalTokens    int64                  `json:"total_tokens" db:"total_tokens"`
-	TotalSize      int64                  `json:"total_size" db:"total_size"`
-	Settings       map[string]interface{} `json:"settings" db:"settings"`
-	Status         string                 `json:"status" db:"status"`
-	CreatedAt      time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at" db:"updated_at"`
-	DeletedAt      *time.Time             `json:"-" db:"deleted_at"`
+	ID                  uuid.UUID              `json:"id" db:"id"`
+	UserID              uuid.UUID              `json:"user_id" db:"user_id"`
+	OrgID               *uuid.UUID             `json:"org_id,omitempty" db:"org_id"`
+	Name                string                 `json:"name" db:"name"`
+	Description         *string                `json:"description,omitempty" db:"description"`
+	TemplateID          *uuid.UUID             `json:"template_id,omitempty" db:"template_id"`
+	EmbeddingModel      string                 `json:"embedding_model" db:"embedding_model"`
+	EmbeddingDimensions int                    `json:"embedding_dimensions" db:"embedding_dimensions"`
+	ChunkSize           int                    `json:"chunk_size" db:"chunk_size"`
+	ChunkOverlap        int                    `json:"chunk_overlap" db:"chunk_overlap"`
+	DocCount            int                    `json:"doc_count" db:"doc_count"`
+	ChunkCount          int                    `json:"chunk_count" db:"chunk_count"`
+	TotalTokens         int64                  `json:"total_tokens" db:"total_tokens"`
+	TotalSize           int64                  `json:"total_size" db:"total_size"`
+	Settings            map[string]interface{} `json:"settings" db:"settings"`
+	Status              string                 `json:"status" db:"status"`
+	CreatedAt           time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at" db:"updated_at"`
+	DeletedAt           *time.Time             `json:"-" db:"deleted_at"`
 }
 
 // Document represents an uploaded document.
