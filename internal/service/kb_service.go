@@ -165,10 +165,10 @@ func (s *KnowledgeBaseService) CreateKnowledgeBase(ctx context.Context, userID u
 func (s *KnowledgeBaseService) GetKnowledgeBase(ctx context.Context, userID, kbID uuid.UUID) (*domain.KnowledgeBase, error) {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("knowledge base not found: %w", err)
+		return nil, fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return nil, fmt.Errorf("forbidden")
+		return nil, domain.ErrForbidden
 	}
 	return kb, nil
 }
@@ -197,10 +197,10 @@ func (s *KnowledgeBaseService) UpdateKnowledgeBase(ctx context.Context, userID, 
 	}
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("knowledge base not found: %w", err)
+		return nil, fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return nil, fmt.Errorf("forbidden")
+		return nil, domain.ErrForbidden
 	}
 
 	update := &postgres.KBUpdate{}
@@ -241,10 +241,10 @@ func (s *KnowledgeBaseService) UpdateKnowledgeBase(ctx context.Context, userID, 
 func (s *KnowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, userID, kbID uuid.UUID) error {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return fmt.Errorf("knowledge base not found: %w", err)
+		return fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return fmt.Errorf("forbidden")
+		return domain.ErrForbidden
 	}
 	if err := s.kbRepo.Delete(ctx, kbID); err != nil {
 		return err
@@ -257,10 +257,10 @@ func (s *KnowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, userID, 
 func (s *KnowledgeBaseService) UploadDocument(ctx context.Context, userID, kbID uuid.UUID, filename string, fileSize int64, reader io.Reader) (*domain.Document, error) {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("knowledge base not found: %w", err)
+		return nil, fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return nil, fmt.Errorf("forbidden")
+		return nil, domain.ErrForbidden
 	}
 	if err := s.checkEmbeddingCompatibility(kb); err != nil {
 		return nil, err
@@ -392,9 +392,11 @@ func (s *KnowledgeBaseService) processDocument(ctx context.Context, kb *domain.K
 	}
 
 	_ = s.docRepo.UpdateStats(ctx, doc.ID, len(chunks), totalTokens)
+	s.refreshKBStats(ctx, kb.ID)
+	// Publish "ready" only after stats are current, so readers that poll the
+	// document status never observe a ready document with stale KB counters.
 	_ = s.docRepo.UpdateStatus(ctx, doc.ID, domain.DocumentStatusReady, nil)
 
-	s.refreshKBStats(ctx, kb.ID)
 	invalidateSearchCache(ctx, s.cache, kb.ID)
 
 	s.logger.Info("document processed", "doc_id", doc.ID.String(), "chunks", len(chunks), "tokens", totalTokens)
@@ -431,10 +433,10 @@ func (s *KnowledgeBaseService) refreshKBStats(ctx context.Context, kbID uuid.UUI
 func (s *KnowledgeBaseService) ListDocuments(ctx context.Context, userID, kbID uuid.UUID, page, pageSize int) ([]*domain.Document, int, error) {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("knowledge base not found: %w", err)
+		return nil, 0, fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return nil, 0, fmt.Errorf("forbidden")
+		return nil, 0, domain.ErrForbidden
 	}
 
 	if page < 1 {
@@ -452,15 +454,15 @@ func (s *KnowledgeBaseService) ListDocuments(ctx context.Context, userID, kbID u
 func (s *KnowledgeBaseService) DeleteDocument(ctx context.Context, userID, kbID, docID uuid.UUID) error {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return fmt.Errorf("knowledge base not found: %w", err)
+		return fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return fmt.Errorf("forbidden")
+		return domain.ErrForbidden
 	}
 
 	doc, err := s.docRepo.GetByID(ctx, docID)
 	if err != nil {
-		return fmt.Errorf("document not found")
+		return fmt.Errorf("document %w", domain.ErrNotFound)
 	}
 	if doc.KnowledgeBaseID != kbID {
 		return fmt.Errorf("document does not belong to this knowledge base")

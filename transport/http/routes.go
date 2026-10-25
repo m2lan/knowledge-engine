@@ -14,8 +14,14 @@ func Routes(
 	r chi.Router,
 	kbHandler *handler.KnowledgeBaseHandler,
 	searchHandler *handler.SearchHandler,
+	mcpHandler http.Handler,
 	authMiddleware func(http.Handler) http.Handler,
 ) {
+	// MCP over Streamable HTTP. It reuses the same authentication as the REST API.
+	if mcpHandler != nil {
+		r.With(authMiddleware).Post("/mcp", mcpHandler.ServeHTTP)
+	}
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authMiddleware)
 

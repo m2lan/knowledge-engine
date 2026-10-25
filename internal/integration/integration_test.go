@@ -20,6 +20,7 @@ import (
 
 	knowledge "github.com/omnidev/knowledge-engine"
 	"github.com/omnidev/knowledge-engine/domain"
+	"github.com/omnidev/knowledge-engine/transport/mcp"
 )
 
 const testEmbeddingDimensions = 384
@@ -345,4 +346,198 @@ func connect(t *testing.T, dbURL string) *pgxpool.Pool {
 		t.Fatalf("ping database: %v", err)
 	}
 	return pool
+}
+
+func TestMCPTools(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("set TEST_DATABASE_URL to run integration tests")
+	}
+	requireTestDatabase(t, dbURL)
+	resetDatabase(t, dbURL)
+
+	fake := newFakeEmbeddingServer(t, testEmbeddingDimensions)
+	engine := newTestEngine(t, dbURL, fake.server.URL, testEmbeddingDimensions, "")
+	userID := uuid.New()
+	server := mcp.NewServer(engine.KnowledgeBaseService(), engine.SearchService())
+
+	listResponse := mcpRequest(t, server, userID, "tools/list", nil)
+	var toolsResult mcp.ToolsListResult
+	mcpDecodeResult(t, listResponse, &toolsResult)
+	if len(toolsResult.Tools) < 6 {
+		t.Fatalf("tools/list returned %d tools, want at least 6", len(toolsResult.Tools))
+	}
+
+	createResponse := mcpRequest(t, server, userID, "tools/call", map[string]interface{}{
+		"name": "knowledge_create_base",
+		"arguments": map[string]interface{}{
+			"name":          "mcp integration",
+			"chunk_size":    200,
+			"chunk_overlap": 20,
+		},
+	})
+	var kb domain.KnowledgeBase
+	mcpResult(t, createResponse, &kb)
+	if kb.ID == uuid.Nil || kb.Name != "mcp integration" {
+		t.Fatalf("unexpected created KB: %+v", kb)
+	}
+	if kb.EmbeddingDimensions != testEmbeddingDimensions {
+		t.Errorf("KB dimensions = %d, want %d", kb.EmbeddingDimensions, testEmbeddingDimensions)
+	}
+
+	content := "# MCP\nZeta marker appears only in this MCP ingested document. " +
+		strings.Repeat("Additional context follows. ", 10)
+	ingestResponse := mcpRequest(t, server, userID, "tools/call", map[string]interface{}{
+		"name": "knowledge_ingest_text",
+		"arguments": map[string]interface{}{
+			"knowledge_base_id": kb.ID.String(),
+			"content":           content,
+			"filename":          "note.md",
+		},
+	})
+	var ingestResult struct {
+		Document *domain.Document `json:"document"`
+	}
+	mcpResult(t, ingestResponse, &ingestResult)
+	if ingestResult.Document == nil {
+		t.Fatal("knowledge_ingest_text returned no document")
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		doc, err := engine.KnowledgeBaseService().GetDocument(context.Background(), ingestResult.Document.ID)
+		if err != nil {
+			t.Fatalf("GetDocument() error = %v", err)
+		}
+		if doc.Status == domain.DocumentStatusReady {
+			break
+		}
+		if doc.Status == domain.DocumentStatusFailed {
+			t.Fatalf("document processing failed: %v", doc.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("document did not finish processing in time")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	docsResponse := mcpRequest(t, server, userID, "tools/call", map[string]interface{}{
+		"name":      "knowledge_list_documents",
+		"arguments": map[string]interface{}{"knowledge_base_id": kb.ID.String()},
+	})
+	var docsResult struct {
+		Documents  []*domain.Document `json:"documents"`
+		TotalCount int                `json:"total_count"`
+	}
+	mcpResult(t, docsResponse, &docsResult)
+	if docsResult.TotalCount != 1 || len(docsResult.Documents) != 1 {
+		t.Fatalf("list documents = %d/%d, want 1/1", len(docsResult.Documents), docsResult.TotalCount)
+	}
+
+	searchResponse := mcpRequest(t, server, userID, "tools/call", map[string]interface{}{
+		"name": "knowledge_search",
+		"arguments": map[string]interface{}{
+			"knowledge_base_id": kb.ID.String(),
+			"query":             "zeta marker",
+			"top_k":             5,
+		},
+	})
+	var searchResult struct {
+		Count   int `json:"count"`
+		Results []struct {
+			Content string  `json:"content"`
+			Score   float64 `json:"score"`
+		} `json:"results"`
+	}
+	mcpResult(t, searchResponse, &searchResult)
+	if searchResult.Count == 0 {
+		t.Fatal("knowledge_search returned no results")
+	}
+	if !strings.Contains(strings.ToLower(searchResult.Results[0].Content), "zeta") {
+		t.Errorf("top result does not contain the query term: %q", searchResult.Results[0].Content)
+	}
+
+	unauthorized := mcpRequestAs(t, server, uuid.New(), "tools/call", map[string]interface{}{
+		"name":      "knowledge_get_base",
+		"arguments": map[string]interface{}{"knowledge_base_id": kb.ID.String()},
+	})
+	var unauthorizedResult mcp.ToolCallResult
+	mcpDecodeResult(t, unauthorized, &unauthorizedResult)
+	if !unauthorizedResult.IsError {
+		t.Fatal("expected another user's KB lookup to fail")
+	}
+}
+
+func mcpRequest(t *testing.T, server *mcp.Server, userID uuid.UUID, method string, params map[string]interface{}) mcp.Response {
+	t.Helper()
+	return mcpRequestAs(t, server, userID, method, params)
+}
+
+func mcpRequestAs(t *testing.T, server *mcp.Server, userID uuid.UUID, method string, params map[string]interface{}) mcp.Response {
+	t.Helper()
+	request := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  method,
+	}
+	if params != nil {
+		request["params"] = params
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal MCP request: %v", err)
+	}
+	raw, err := server.HandlePayload(context.Background(), userID, payload)
+	if err != nil {
+		t.Fatalf("HandlePayload() error = %v", err)
+	}
+	if raw == nil {
+		t.Fatal("MCP request returned no response")
+	}
+	var response mcp.Response
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatalf("unmarshal MCP response: %v", err)
+	}
+	if response.Error != nil {
+		t.Fatalf("MCP protocol error: %+v", response.Error)
+	}
+	return response
+}
+
+func mcpResult(t *testing.T, response mcp.Response, target interface{}) {
+	t.Helper()
+	resultMap := mcpDecodeResult(t, response, nil)
+	if isError, _ := resultMap["isError"].(bool); isError {
+		t.Fatalf("tool returned an error: %+v", resultMap["content"])
+	}
+	content, ok := resultMap["content"].([]interface{})
+	if !ok || len(content) == 0 {
+		t.Fatalf("tool result has no content: %+v", resultMap)
+	}
+	block, _ := content[0].(map[string]interface{})
+	text, _ := block["text"].(string)
+	if text == "" {
+		t.Fatalf("tool result text is empty: %+v", resultMap)
+	}
+	if err := json.Unmarshal([]byte(text), target); err != nil {
+		t.Fatalf("decode tool content: %v (%s)", err, text)
+	}
+}
+
+func mcpDecodeResult(t *testing.T, response mcp.Response, target interface{}) map[string]interface{} {
+	t.Helper()
+	data, err := json.Marshal(response.Result)
+	if err != nil {
+		t.Fatalf("marshal MCP result: %v", err)
+	}
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(data, &resultMap); err != nil {
+		t.Fatalf("decode MCP result: %v", err)
+	}
+	if target != nil {
+		if err := json.Unmarshal(data, target); err != nil {
+			t.Fatalf("decode MCP result target: %v", err)
+		}
+	}
+	return resultMap
 }

@@ -50,7 +50,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.searchSvc.Search(r.Context(), userID, kbID, &input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 

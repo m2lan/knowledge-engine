@@ -14,6 +14,7 @@ import (
 	knowledge "github.com/omnidev/knowledge-engine"
 	"github.com/omnidev/knowledge-engine/transport/http/handler"
 	"github.com/omnidev/knowledge-engine/transport/http/middleware"
+	"github.com/omnidev/knowledge-engine/transport/mcp"
 )
 
 // Server wraps the HTTP server with all dependencies.
@@ -40,7 +41,7 @@ func (s *Server) ListenAndServe() error {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key", "Mcp-Session-Id", "MCP-Protocol-Version"},
 		ExposedHeaders:   []string{"X-Request-ID"},
 		AllowCredentials: false,
 		MaxAge:           300,
@@ -56,11 +57,14 @@ func (s *Server) ListenAndServe() error {
 	kbHandler := handler.NewKnowledgeBaseHandler(kbSvc)
 	searchHandler := handler.NewSearchHandler(searchSvc)
 
+	mcpServer := mcp.NewServer(kbSvc, searchSvc)
+	mcpHandler := mcp.NewHTTPHandler(mcpServer)
+
 	// Auth middleware
 	authMW := middleware.Auth(s.engine.Authenticator())
 
 	// Register routes
-	Routes(r, kbHandler, searchHandler, authMW)
+	Routes(r, kbHandler, searchHandler, mcpHandler, authMW)
 
 	addr := s.cfg.Server.Address
 	if addr == "" {

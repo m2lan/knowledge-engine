@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 );
 
 ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS embedding_dimensions INT NOT NULL DEFAULT 1536;
+ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS template_id UUID;
 
 CREATE INDEX IF NOT EXISTS idx_kb_user ON knowledge_bases(user_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_kb_org ON knowledge_bases(org_id) WHERE deleted_at IS NULL;
@@ -54,6 +55,10 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS idx_docs_kb ON documents(knowledge_base_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status) WHERE status != 'ready';
+
+-- Columns added after the initial RAG schema; required when adopting an
+-- existing database created by the legacy gateway/rag service.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 
 -- Document Chunks
 -- The default column matches the default embedding provider (OpenAI

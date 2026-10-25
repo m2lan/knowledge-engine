@@ -35,11 +35,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}()
 
 	if _, err := conn.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
+		CREATE TABLE IF NOT EXISTS knowledge_schema_migrations (
 			version    TEXT PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`); err != nil {
-		return fmt.Errorf("migrations: create schema_migrations: %w", err)
+		return fmt.Errorf("migrations: create knowledge_schema_migrations: %w", err)
 	}
 
 	entries, err := fs.ReadDir(files, ".")
@@ -59,7 +59,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 		var applied bool
 		if err := conn.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)`, version,
+			`SELECT EXISTS(SELECT 1 FROM knowledge_schema_migrations WHERE version = $1)`, version,
 		).Scan(&applied); err != nil {
 			return fmt.Errorf("migrations: check %s: %w", version, err)
 		}
@@ -75,7 +75,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("migrations: apply %s: %w", version, err)
 		}
 		if _, err := conn.Exec(ctx,
-			`INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING`, version,
+			`INSERT INTO knowledge_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING`, version,
 		); err != nil {
 			return fmt.Errorf("migrations: record %s: %w", version, err)
 		}

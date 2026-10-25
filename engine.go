@@ -61,16 +61,17 @@ func New(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("database: %w", err)
 	}
 
-	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
-	defer cancel()
-
-	if !cfg.SkipMigrations {
-		if err := migrations.Migrate(startupCtx, db.Pool()); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrate: %w", err)
-		}
+	engine, err := buildEngine(cfg, db.Pool(), db, logger)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
 	}
+	return engine, nil
+}
 
+// buildEngine creates an Engine from a database URL: migrations, embedder,
+// storage, parser, cache and auth all come from cfg.
+func buildEngine(cfg Config, pool *pgxpool.Pool, db Database, logger Logger) (*Engine, error) {
 	emb, err := embedder.New(embedder.EmbedderConfig{
 		Provider:   cfg.Embedding.Provider,
 		Model:      cfg.Embedding.Model,
@@ -79,29 +80,45 @@ func New(cfg Config) (*Engine, error) {
 		Dimensions: cfg.Embedding.Dimensions,
 	})
 	if err != nil {
-		_ = db.Close()
 		return nil, fmt.Errorf("embedder: %w", err)
 	}
 
-	embeddingColumn, err := postgres.EnsureEmbeddingColumn(startupCtx, db.Pool(), emb.Dimensions())
+	storage, err := newStorage(cfg)
 	if err != nil {
-		_ = db.Close()
+		return nil, err
+	}
+
+	return buildEngineWithDeps(cfg, pool, db, emb, storage, logger)
+}
+
+// buildEngineWithDeps assembles engine services for an existing pool and
+// already-constructed embedder/storage.
+func buildEngineWithDeps(
+	cfg Config,
+	pool *pgxpool.Pool,
+	db Database,
+	emb embedder.Embedder,
+	storage Storage,
+	logger Logger,
+) (*Engine, error) {
+	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
+
+	if !cfg.SkipMigrations {
+		if err := migrations.Migrate(startupCtx, pool); err != nil {
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
+	}
+
+	embeddingColumn, err := postgres.EnsureEmbeddingColumn(startupCtx, pool, emb.Dimensions())
+	if err != nil {
 		return nil, fmt.Errorf("embedding schema: %w", err)
 	}
 
 	cache := newCache(cfg, logger)
-
-	storage, err := newStorage(cfg)
-	if err != nil {
-		closeQuietly(cache)
-		_ = db.Close()
-		return nil, err
-	}
-
 	auth, err := newAuthenticator(cfg)
 	if err != nil {
 		closeQuietly(cache)
-		_ = db.Close()
 		return nil, err
 	}
 
@@ -113,16 +130,15 @@ func New(cfg Config) (*Engine, error) {
 	})
 	if err != nil {
 		closeQuietly(cache)
-		_ = db.Close()
 		return nil, fmt.Errorf("parser: %w", err)
 	}
 
 	textChunker := chunker.NewSemanticChunker(512, 50)
-	hybridRetriever := retriever.NewHybridRetriever(db.Pool(), emb, embeddingColumn)
+	hybridRetriever := retriever.NewHybridRetriever(pool, emb, embeddingColumn)
 
-	kbRepo := postgres.NewKnowledgeBaseRepository(db.Pool())
-	docRepo := postgres.NewDocumentRepository(db.Pool())
-	chunkRepo := postgres.NewChunkRepository(db.Pool(), embeddingColumn)
+	kbRepo := postgres.NewKnowledgeBaseRepository(pool)
+	docRepo := postgres.NewDocumentRepository(pool)
+	chunkRepo := postgres.NewChunkRepository(pool, embeddingColumn)
 
 	kbSvc := service.NewKnowledgeBaseService(
 		kbRepo, docRepo, chunkRepo,
@@ -216,7 +232,8 @@ func newAuthenticator(cfg Config) (Authenticator, error) {
 
 // NewFromPool creates an Engine from an existing pgxpool.Pool.
 // This is useful for embedding the knowledge engine into an existing application
-// that already has a database connection. Other dependencies use defaults.
+// that already has a database connection. Cache, parser, auth and storage bucket
+// use defaults; use NewFromPoolWithConfig to customise them.
 func NewFromPool(pool *pgxpool.Pool, emb embedder.Embedder, storage Storage, logger Logger) (*Engine, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pool is required")
@@ -235,51 +252,42 @@ func NewFromPool(pool *pgxpool.Pool, emb embedder.Embedder, storage Storage, log
 		}
 	}
 
-	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
-	defer cancel()
+	return buildEngineWithDeps(Config{}.Defaults(), pool, nil, emb, storage, logger)
+}
 
-	if err := migrations.Migrate(startupCtx, pool); err != nil {
-		return nil, fmt.Errorf("migrate: %w", err)
+// NewFromPoolWithConfig creates an Engine from an existing pool using the
+// supplied configuration. DatabaseURL is ignored because the pool is managed by
+// the caller. Embedding, Redis cache, parser, storage and auth are all taken
+// from cfg, which makes this the entry point for embedding the engine inside
+// another service.
+func NewFromPoolWithConfig(pool *pgxpool.Pool, cfg Config) (*Engine, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("pool is required")
 	}
-	embeddingColumn, err := postgres.EnsureEmbeddingColumn(startupCtx, pool, emb.Dimensions())
+	cfg = cfg.Defaults()
+
+	logger := cfg.Logger
+	if logger == nil {
+		logger = &defaultLogger{}
+	}
+
+	emb, err := embedder.New(embedder.EmbedderConfig{
+		Provider:   cfg.Embedding.Provider,
+		Model:      cfg.Embedding.Model,
+		APIKey:     cfg.Embedding.APIKey,
+		BaseURL:    cfg.Embedding.BaseURL,
+		Dimensions: cfg.Embedding.Dimensions,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("embedding schema: %w", err)
+		return nil, fmt.Errorf("embedder: %w", err)
 	}
 
-	auth := Authenticator(noop.NewWithUserID(DefaultUserID))
-	cache := Cache(memory.New())
-
-	kbRepo := postgres.NewKnowledgeBaseRepository(pool)
-	docRepo := postgres.NewDocumentRepository(pool)
-	chunkRepo := postgres.NewChunkRepository(pool, embeddingColumn)
-
-	chunkerInst := chunker.NewSemanticChunker(512, 50)
-	docParser, err := parser.New(parser.Config{Type: "tika", TikaEndpoint: "http://localhost:9998", TikaTimeout: 60 * time.Second})
+	storage, err := newStorage(cfg)
 	if err != nil {
-		closeQuietly(cache)
-		return nil, fmt.Errorf("parser: %w", err)
+		return nil, err
 	}
-	retrieverInst := retriever.NewHybridRetriever(pool, emb, embeddingColumn)
 
-	kbSvc := service.NewKnowledgeBaseService(
-		kbRepo, docRepo, chunkRepo,
-		storage, docParser, chunkerInst, emb, logger,
-		"knowledge-docs", cache,
-	)
-	searchSvc := service.NewSearchService(
-		retrieverInst, kbRepo, emb.Model(), emb.Dimensions(), cache, 60*time.Second,
-	)
-
-	return &Engine{
-		db:        nil, // pool managed externally
-		cache:     cache,
-		storage:   storage,
-		auth:      auth,
-		logger:    logger,
-		kbSvc:     kbSvc,
-		searchSvc: searchSvc,
-		embedder:  emb,
-	}, nil
+	return buildEngineWithDeps(cfg, pool, nil, emb, storage, logger)
 }
 
 // KnowledgeBaseService returns the knowledge base service.

@@ -75,10 +75,10 @@ func (s *SearchService) Search(ctx context.Context, userID, kbID uuid.UUID, inpu
 
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("knowledge base not found: %w", err)
+		return nil, fmt.Errorf("knowledge base %w: %v", domain.ErrNotFound, err)
 	}
 	if kb.UserID != userID {
-		return nil, fmt.Errorf("forbidden")
+		return nil, domain.ErrForbidden
 	}
 	if err := s.checkEmbeddingCompatibility(kb); err != nil {
 		return nil, err

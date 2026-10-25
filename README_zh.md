@@ -167,6 +167,68 @@ curl http://localhost:8083/api/v1/knowledge?page=1&page_size=20 -H "$AUTH"
 curl -X DELETE http://localhost:8083/api/v1/knowledge/{kb_id}/documents/{doc_id} -H "$AUTH"
 ```
 
+### 5. MCP Server
+
+同一个引擎也可以作为 [Model Context Protocol](https://modelcontextprotocol.io) 服务暴露，Claude Desktop、
+Cursor、VS Code 等 MCP 客户端无需写胶水代码即可把知识库当作工具使用。
+
+支持两种传输方式：
+
+| 传输方式 | 启动方式 | 认证 |
+|----------|----------|------|
+| Streamable HTTP | 主服务内置，`POST /mcp` | 与 REST API 相同（JWT / API Key / noop） |
+| stdio | `go build -o bin/knowledge-mcp ./cmd/mcp` | `MCP_USER_ID` 环境变量（默认取 `DEFAULT_USER_ID`） |
+
+**MCP 客户端配置（stdio）：**
+
+```json
+{
+  "mcpServers": {
+    "knowledge": {
+      "command": "/path/to/knowledge-mcp",
+      "env": {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/knowledge?sslmode=disable",
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_API_KEY": "sk-...",
+        "MCP_USER_ID": "00000000-0000-0000-0000-000000000001"
+      }
+    }
+  }
+}
+```
+
+**HTTP 传输：**
+
+```bash
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"knowledge_search","arguments":{"knowledge_base_id":"<kb_id>","query":"如何重置密码","top_k":5}}}'
+```
+
+HTTP 端点是无状态的：每次 POST 携带一条 JSON-RPC 消息（或批量消息）并返回 JSON；
+`notifications/initialized` 等通知返回 `202 Accepted`。协议版本为 `2024-11-05`。
+
+**工具列表：**
+
+| 工具 | 用途 |
+|------|------|
+| `knowledge_search` | 在指定知识库中做向量 + 全文混合检索 |
+| `knowledge_list_bases` | 列出当前用户的知识库 |
+| `knowledge_get_base` | 获取知识库元数据与统计信息 |
+| `knowledge_create_base` | 创建知识库（分块大小/重叠按 KB 生效） |
+| `knowledge_list_documents` | 列出文档及入库状态 |
+| `knowledge_ingest_text` | 写入纯文本或 Markdown（异步解析/向量化） |
+
+所有工具都使用已认证的用户身份，权限规则与 REST API 一致。
+
 ## 配置
 
 ### 环境变量
@@ -199,6 +261,7 @@ curl -X DELETE http://localhost:8083/api/v1/knowledge/{kb_id}/documents/{doc_id}
 | `API_KEY` | — | 静态 API Key；未设置 `AUTH_TYPE` 时启用 API Key 认证 |
 | `API_KEY_USER_ID` | `00000000-0000-0000-0000-000000000001` | API Key 请求归属的 UUID |
 | `DEFAULT_USER_ID` | `00000000-0000-0000-0000-000000000001` | 无认证模式下请求归属的 UUID |
+| `MCP_USER_ID` | `DEFAULT_USER_ID` | stdio MCP 服务（`cmd/mcp`）使用的用户身份 |
 | `SERVER_ADDRESS` | `:8083` | HTTP 监听地址 |
 | `SERVER_READ_TIMEOUT` | `30s` | HTTP 读超时 |
 | `SERVER_WRITE_TIMEOUT` | `300s` | HTTP 写超时（大文件上传） |

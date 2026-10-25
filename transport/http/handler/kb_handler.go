@@ -3,12 +3,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/omnidev/knowledge-engine/domain"
 	"github.com/omnidev/knowledge-engine/internal/service"
 	"github.com/omnidev/knowledge-engine/transport/http/middleware"
 )
@@ -43,7 +45,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(w http.ResponseWriter, r *http
 
 	kbs, total, err := h.kbSvc.ListKnowledgeBases(r.Context(), userID, page, pageSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -80,7 +82,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(w http.ResponseWriter, r *htt
 
 	kb, err := h.kbSvc.CreateKnowledgeBase(r.Context(), userID, &input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -110,7 +112,7 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(w http.ResponseWriter, r *http.R
 
 	kb, err := h.kbSvc.GetKnowledgeBase(r.Context(), userID, kbID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -146,7 +148,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(w http.ResponseWriter, r *htt
 
 	kb, err := h.kbSvc.UpdateKnowledgeBase(r.Context(), userID, kbID, &input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -175,7 +177,7 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(w http.ResponseWriter, r *htt
 	}
 
 	if err := h.kbSvc.DeleteKnowledgeBase(r.Context(), userID, kbID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -210,7 +212,7 @@ func (h *KnowledgeBaseHandler) ListDocuments(w http.ResponseWriter, r *http.Requ
 
 	docs, total, err := h.kbSvc.ListDocuments(r.Context(), userID, kbID, page, pageSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -259,7 +261,7 @@ func (h *KnowledgeBaseHandler) UploadDocument(w http.ResponseWriter, r *http.Req
 
 	doc, err := h.kbSvc.UploadDocument(r.Context(), userID, kbID, header.Filename, header.Size, file)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -294,7 +296,7 @@ func (h *KnowledgeBaseHandler) DeleteDocument(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.kbSvc.DeleteDocument(r.Context(), userID, kbID, docID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -308,6 +310,20 @@ func writeJSON(w http.ResponseWriter, code int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(data)
+}
+
+// writeServiceError maps service sentinel errors to HTTP status codes.
+func writeServiceError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		code = http.StatusNotFound
+	case errors.Is(err, domain.ErrForbidden):
+		code = http.StatusForbidden
+	case errors.Is(err, domain.ErrInvalidInput):
+		code = http.StatusBadRequest
+	}
+	writeError(w, code, err.Error())
 }
 
 // writeError writes an error response.

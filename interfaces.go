@@ -5,6 +5,7 @@
 package knowledge
 
 import (
+	"github.com/omnidev/knowledge-engine/domain"
 	"github.com/omnidev/knowledge-engine/internal/embedder"
 	"github.com/omnidev/knowledge-engine/internal/service"
 	"github.com/omnidev/knowledge-engine/types"
@@ -28,8 +29,19 @@ type (
 	SearchInput          = service.SearchInput
 )
 
+// Re-export domain entities for external consumers.
+type (
+	KnowledgeBase = domain.KnowledgeBase
+	Document      = domain.Document
+	DocumentChunk = domain.DocumentChunk
+	SearchResult  = domain.SearchResult
+)
+
 // Re-export embedder types for external consumers.
-type EmbedderConfig = embedder.EmbedderConfig
+type (
+	EmbedderConfig = embedder.EmbedderConfig
+	Embedder       = embedder.Embedder
+)
 
 // NewEmbedder creates a new embedder from config.
 var NewEmbedder = embedder.New

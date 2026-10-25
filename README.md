@@ -164,6 +164,71 @@ curl http://localhost:8083/api/v1/knowledge?page=1&page_size=20 -H "$AUTH"
 curl -X DELETE http://localhost:8083/api/v1/knowledge/{kb_id}/documents/{doc_id} -H "$AUTH"
 ```
 
+### 5. MCP Server
+
+The same engine is exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server, so
+Claude Desktop, Cursor, VS Code, and other MCP clients can use a knowledge base as tools without
+writing glue code.
+
+Two transports are available:
+
+| Transport | How to run | Authentication |
+|-----------|------------|----------------|
+| Streamable HTTP | Built into the main server at `POST /mcp` | Same as the REST API (JWT / API key / noop) |
+| stdio | `go build -o bin/knowledge-mcp ./cmd/mcp` | `MCP_USER_ID` environment variable (defaults to `DEFAULT_USER_ID`) |
+
+**MCP client configuration (stdio):**
+
+```json
+{
+  "mcpServers": {
+    "knowledge": {
+      "command": "/path/to/knowledge-mcp",
+      "env": {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/knowledge?sslmode=disable",
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_API_KEY": "sk-...",
+        "MCP_USER_ID": "00000000-0000-0000-0000-000000000001"
+      }
+    }
+  }
+}
+```
+
+**HTTP transport:**
+
+```bash
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" -H "$AUTH" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"knowledge_search","arguments":{"knowledge_base_id":"<kb_id>","query":"reset password","top_k":5}}}'
+```
+
+The HTTP endpoint is stateless: each POST carries one JSON-RPC message (or batch) and returns JSON.
+Notifications such as `notifications/initialized` return `202 Accepted`. JSON-RPC protocol version:
+`2024-11-05`.
+
+**Tools:**
+
+| Tool | Purpose |
+|------|---------|
+| `knowledge_search` | Hybrid vector + full-text search in one knowledge base |
+| `knowledge_list_bases` | List the caller's knowledge bases |
+| `knowledge_get_base` | Get knowledge base metadata and statistics |
+| `knowledge_create_base` | Create a knowledge base (per-KB chunk size/overlap) |
+| `knowledge_list_documents` | List documents and their ingestion status |
+| `knowledge_ingest_text` | Ingest plain text or Markdown (async parsing/embedding) |
+
+All tools operate under the authenticated user identity, so the same ownership rules apply as the
+REST API.
+
 ## Configuration
 
 ### Environment Variables
@@ -196,6 +261,7 @@ curl -X DELETE http://localhost:8083/api/v1/knowledge/{kb_id}/documents/{doc_id}
 | `API_KEY` | — | Static API key; enables API-key auth when `AUTH_TYPE` is unset |
 | `API_KEY_USER_ID` | `00000000-0000-0000-0000-000000000001` | UUID attributed to API-key requests |
 | `DEFAULT_USER_ID` | `00000000-0000-0000-0000-000000000001` | UUID attributed to requests in no-op mode |
+| `MCP_USER_ID` | `DEFAULT_USER_ID` | Identity used by the stdio MCP server (`cmd/mcp`) |
 | `SERVER_ADDRESS` | `:8083` | HTTP listen address |
 | `SERVER_READ_TIMEOUT` | `30s` | HTTP read timeout |
 | `SERVER_WRITE_TIMEOUT` | `300s` | HTTP write timeout (large uploads) |
